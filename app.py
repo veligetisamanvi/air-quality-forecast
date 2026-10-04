@@ -226,6 +226,45 @@ with right:
         ).properties(height=320)
     )
 
+# ---- long-term history (optional: needs app_data/history.csv from src.history) ----
+history_path = DATA / "history.csv"
+if history_path.exists():
+    hist = pd.read_csv(history_path)
+    first, last = hist.iloc[0], hist.iloc[-1]
+    st.subheader(f"Dallas County air over {int(last['year'] - first['year']) + 1} years")
+    h1, h2 = st.columns(2)
+    h1.metric(
+        f"Bad-air days in {int(last['year'])}",
+        int(last["unhealthy_days"]),
+        f"{int(last['unhealthy_days'] - first['unhealthy_days']):+d} vs {int(first['year'])}",
+        delta_color="inverse",
+    )
+    h2.metric(
+        f"Average AQI in {int(last['year'])}",
+        f"{last['mean_aqi']:.0f}",
+        f"{last['mean_aqi'] - first['mean_aqi']:+.0f} vs {int(first['year'])}",
+        delta_color="inverse",
+    )
+    tooltip = [
+        alt.Tooltip("year:O", title="Year"),
+        alt.Tooltip("unhealthy_days:Q", title="Bad-air days"),
+        alt.Tooltip("mean_aqi:Q", title="Average AQI"),
+        alt.Tooltip("top_pollutant:N", title="Most common main pollutant"),
+        alt.Tooltip("days_reported:Q", title="Days with data"),
+    ]
+    bars = alt.Chart(hist).mark_bar(color="#d62728", opacity=0.75).encode(
+        x=alt.X("year:O", title=None, axis=alt.Axis(labelAngle=-45, values=list(range(1980, 2031, 5)))),
+        y=alt.Y("unhealthy_days:Q", title="Bad-air days per year"),
+        tooltip=tooltip,
+    )
+    st.altair_chart(bars.properties(height=280))
+    st.caption(
+        "Bad-air day = Unhealthy for Sensitive Groups or worse. Compare decades loosely: "
+        "the pollutants measured (PM2.5 only from ~1999), the number of monitors, and EPA's "
+        "AQI rules have all changed over time. The model is trained on 2010–2023 only, "
+        "because older years reflect a different pollution mix."
+    )
+
 # ---- method ----
 with st.expander("Method and limitations"):
     st.markdown(
