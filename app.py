@@ -265,6 +265,40 @@ if history_path.exists():
         "because older years reflect a different pollution mix."
     )
 
+# ---- look up any day (optional: needs app_data/daily_lookup.csv from src.history) ----
+lookup_path = DATA / "daily_lookup.csv"
+if lookup_path.exists():
+
+    @st.cache_data
+    def load_lookup() -> pd.DataFrame:
+        return pd.read_csv(lookup_path, parse_dates=["date"]).set_index("date")
+
+    days = load_lookup()
+    st.subheader("Look up any day")
+    picked = st.date_input(
+        "Pick a date",
+        value=pd.Timestamp("2008-10-16").date(),
+        min_value=days.index.min().date(),
+        max_value=days.index.max().date(),
+        key="lookup_date",
+    )
+    d = days.loc[pd.Timestamp(picked)]
+    st.markdown(f"**{pd.Timestamp(picked):%A, %B %d, %Y} · Dallas County**")
+    w1, w2, w3, w4 = st.columns(4)
+    w1.metric("High / low (°F)", f"{d['temp_max_f']:.0f}/{d['temp_min_f']:.0f}")
+    w2.metric("Rain (in)", f"{d['rain_in']:.2f}")
+    w3.metric("Max wind (mph)", f"{d['wind_max_mph']:.0f}")
+    w4.metric("Humidity", f"{d['humidity_pct']:.0f}%")
+    if pd.notna(d["aqi"]):
+        st.metric("Air quality", f"AQI {d['aqi']:.0f} · {d['category']}",
+                  help=f"Main pollutant: {d['pollutant']}")
+    else:
+        st.info("No air quality was reported for Dallas County that day.")
+    st.caption(
+        "Weather: Open-Meteo historical reanalysis for the center of the county "
+        "(a modeled estimate, not a single weather station). Air quality: EPA daily county AQI."
+    )
+
 # ---- method ----
 with st.expander("Method and limitations"):
     st.markdown(

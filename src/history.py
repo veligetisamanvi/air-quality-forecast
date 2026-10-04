@@ -1,12 +1,14 @@
 """Yearly air quality history for the dashboard (separate from model training).
 
 Downloads EPA daily county AQI for a long period (default 1980-2025) and writes
-app_data/history.csv with one row per year. Weather is not needed here.
+app_data/history.csv with one row per year. If --lat/--lon are given, it also
+fetches daily weather and writes app_data/daily_lookup.csv (one row per day)
+for the dashboard's "look up any day" feature.
 
 This does NOT touch data/processed/, so your training data stays 2010-2024.
 
 Usage (from the project root, venv active):
-    python -m src.history --state "Texas" --county "Dallas"
+    python -m src.history --state "Texas" --county "Dallas" --lat 32.77 --lon -96.78
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import pandas as pd
 import requests
 
 from src.features import CATEGORY_TO_CLASS
-from src.ingest import RAW_DIR, ROOT, load_epa
+from src.ingest import RAW_DIR, ROOT, load_epa, load_weather
 
 log = logging.getLogger("history")
 
@@ -41,12 +43,35 @@ def yearly_summary(epa: pd.DataFrame) -> pd.DataFrame:
     ).reset_index()
 
 
+def daily_lookup(epa: pd.DataFrame, wx: pd.DataFrame) -> pd.DataFrame:
+    """One row per calendar day: AQI + weather in US units, for the date lookup."""
+    cal = pd.DataFrame({"date": pd.date_range(wx["date"].min(), wx["date"].max(), freq="D")})
+    df = cal.merge(wx, on="date", how="left").merge(
+        epa[["date", "aqi", "aqi_category", "defining_param"]], on="date", how="left"
+    )
+    return pd.DataFrame(
+        {
+            "date": df["date"].dt.strftime("%Y-%m-%d"),
+            "aqi": df["aqi"],
+            "category": df["aqi_category"],
+            "pollutant": df["defining_param"],
+            "temp_max_f": (df["temperature_2m_max"] * 9 / 5 + 32).round(0),
+            "temp_min_f": (df["temperature_2m_min"] * 9 / 5 + 32).round(0),
+            "rain_in": (df["precipitation_sum"] / 25.4).round(2),
+            "wind_max_mph": (df["wind_speed_10m_max"] * 0.621371).round(0),
+            "humidity_pct": df["relative_humidity_2m_mean"].round(0),
+        }
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--state", required=True)
     p.add_argument("--county", required=True)
     p.add_argument("--start-year", type=int, default=1980)
     p.add_argument("--end-year", type=int, default=2025)
+    p.add_argument("--lat", type=float, help="latitude; with --lon, also builds daily_lookup.csv")
+    p.add_argument("--lon", type=float, help="longitude; with --lat, also builds daily_lookup.csv")
     args = p.parse_args(argv)
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,6 +91,13 @@ def main(argv: list[str] | None = None) -> None:
     log.info("years: %d-%d", hist["year"].min(), hist["year"].max())
     log.info("\n%s", hist.to_string(index=False))
     log.info("wrote   app_data/history.csv")
+
+    if args.lat is not None and args.lon is not None:
+        wx = load_weather(args.lat, args.lon, f"{args.start_year}-01-01", f"{args.end_year}-12-31")
+        lookup = daily_lookup(epa, wx)
+        lookup.to_csv(APP_DATA / "daily_lookup.csv", index=False)
+        log.info("wrote   app_data/daily_lookup.csv (%d days, %d without AQI)",
+                 len(lookup), lookup["aqi"].isna().sum())
 
 
 if __name__ == "__main__":
